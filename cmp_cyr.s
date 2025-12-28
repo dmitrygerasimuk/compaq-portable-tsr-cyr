@@ -275,6 +275,23 @@ db 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 
 section .text
 main:
+	; Check if already installed: INT 10h points to our signature
+	mov ax, 0x3510
+	int 21h                    ; ES:BX = current INT 10h handler
+
+	push cs
+	pop ds
+	lea si, [isr_sig]
+	mov di, bx
+	add di, (isr_sig - new_isr)
+	mov cx, (isr_sig_end - isr_sig)
+	repe cmpsb
+	je uninstall_tsr
+
+; ------------------------------------------------------------
+; Install
+; ------------------------------------------------------------
+install_tsr:
 	; Get the address of the existing INT 0x10 video interrupt vector
 	mov ax, 0x3510
 	int 21h
@@ -283,26 +300,82 @@ main:
 	
 	; Set video mode 1 (40x25 text) to force a complete screen mode change
 	mov ax, 0x1
-	int 0x10 		
+	int 0x10
 		
 	; Replace interrupt vector 0x10 with our wrapper
 	mov ax, cs
 	mov ds, ax
-    mov dx, new_isr    
+	mov dx, new_isr
 	mov ax, 0x2510
-    int 21h             
+	int 21h
 
-	; Set video mode 3 to test the interrupt routine 
-	mov ax, 0x3 
-	int 0x10 	
+	; Set video mode 3 to test the interrupt routine
+	mov ax, 0x3
+	int 0x10
 
-print_message:
-	mov  dx, msg      
-	mov  ah, 9        
-	int  0x21     
+	jmp print_message_on
 
-	 
+; ------------------------------------------------------------
+; Uninstall: restore old INT 10h and free resident block
+; ------------------------------------------------------------
+uninstall_tsr:
+	; ES is resident segment (from INT 10h vector). Use it to read saved vars.
+	push es
+	pop ds                    ; DS = resident segment
 
+	; restore INT 10h
+	mov ax, [ds:old_isr]       ; segment
+	mov dx, [ds:old_isr + 2]   ; offset
+	push ds
+	mov ds, ax
+	mov ax, 0x2510
+	int 21h
+	pop ds
+
+	; free resident environment (PSP:2Ch), then free resident PSP block
+	; (DOS expects the current PSP to match the owner of the block).
+	mov ah, 0x51              ; get PSP -> BX
+	int 0x21
+	mov [cs:cur_psp], bx
+
+	mov bx, ds                ; set PSP to resident PSP
+	mov ah, 0x50
+	int 0x21
+
+	mov ax, [ds:0x2C]
+	or ax, ax
+	jz uninstall_skip_env_free
+	mov es, ax
+	mov ah, 0x49
+	int 0x21
+uninstall_skip_env_free:
+    mov ax,ds
+	mov es,ax
+	xor ax,ax
+	mov ah, 0x49
+	int 0x21
+
+	; restore original PSP
+	mov bx, [cs:cur_psp]
+	mov ah, 0x50
+	int 0x21
+
+	; print message
+	push cs
+	pop ds
+	mov dx, msg_off
+	mov ah, 9
+	int 0x21
+
+	mov ax, 0x4c00
+	int 0x21
+
+print_message_on:
+	push cs
+	pop ds
+	mov dx, msg_on
+	mov ah, 9
+	int 0x21
 
 exit:
 	; 1. The program occupies:
@@ -334,6 +407,11 @@ restore_isr:
 ; Replacement ISR for INT 0x10 BIOS video routines
 ;
 new_isr:
+	jmp short isr_entry
+isr_sig:
+	db 'CMP_CYR10', 0
+isr_sig_end:
+isr_entry:
 	mov [cs:old_ax], ax
 	cmp ah, 0				; Is this a call to set the video mode? (AH=0)
 	jne call_old_isr
@@ -441,7 +519,8 @@ skip_calibration:
 ; Data and variables
 ;
 	
-msg  db 'Compaq Portable II/III CGA/EGA Russian TSR font v0.1', 0x0d, 0x0a, 'TSR is ON', 0x0d, 0x0a, '$'
+msg_on  db 'Compaq Portable II/III CGA/EGA Russian TSR font v0.2', 0x0d, 0x0a, 'TSR is ON', 0x0d, 0x0a, '$'
+msg_off db 'Compaq Portable II/III CGA/EGA Russian TSR font v0.2', 0x0d, 0x0a, 'TSR is OFF', 0x0d, 0x0a, '$'
 ; $-terminated message
  
 old_isr:	
@@ -449,5 +528,6 @@ old_isr:
 	dw 0		; offset
 	
 old_ax 	dw 0
+cur_psp dw 0
 
 last_screen_mode db 0xff

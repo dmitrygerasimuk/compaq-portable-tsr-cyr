@@ -11,6 +11,6 @@ Output file:  cmp_cyr.com
 -- Sections (summary) ---------------------------------------------------------
 
 Vstart    Vstop     Start     Stop      Length    Class     Name
-00000100  0000021B  00000100  0000021B  0000011B  progbits  .text
-0000021C  00001224  0000021C  00001224  00001008  progbits  .data
+00000100  000002D9  00000100  000002D9  000001D9  progbits  .text
+000002DC  000012E4  000002DC  000012E4  00001008  progbits  .data
 
